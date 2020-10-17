@@ -23,6 +23,7 @@
 (define-gtk gtk_notebook_get_current_page (_fun _GtkWidget -> _int))
 (define-gtk gtk_notebook_set_current_page (_fun _GtkWidget _int -> _void))
 (define-gtk gtk_notebook_get_tab_label  (_fun _GtkWidget _GtkWidget -> _GtkWidget))
+(define-gtk gtk_notebook_set_tab_reorderable (_fun _GtkWidget _GtkWidget _gboolean -> _void))
 
 (define-gtk gtk_container_remove (_fun _GtkWidget _GtkWidget -> _void))
 
@@ -39,6 +40,14 @@
     (let ([wx (gtk->wx gtk)])
       (when wx
         (send wx page-changed i)))))
+
+(define-signal-handler connect-reorder "page-reordered"
+  (_fun _GtkWidget _GtkWidget _int -> _void)
+  (lambda (gtk pageChild new-i)
+    (let ([wx (gtk->wx gtk)])
+      (when wx
+        ; We pass the child here because that lets us calculate the old index
+        (send wx page-reordered pageChild new-i)))))
 
 (define tab-panel%
   (class (client-size-mixin (panel-container-mixin (panel-mixin window%)))
@@ -88,6 +97,9 @@
       ;; make sure no freeze in places:
       (reset-child-freezes)
       (gtk_box_pack_start bin-gtk client-gtk #t #t 0)
+      ; TODO : this needs to be false by default, but on otherwise
+      (displayln "setting reorderable")
+      (gtk_notebook_set_tab_reorderable notebook-gtk bin-gtk #t)
       ;; re-parenting can change the underlying window dc:
       (reset-child-dcs))
 
@@ -141,6 +153,28 @@
         (when callback-ok?
           (queue-window-event this (lambda () (do-callback))))))
     (connect-changed notebook-gtk)
+    
+    ; TODO set-reorder-callback
+    ;  When set to false (default) it tabs won't be reorderable.
+    ;  When set to a function, it should be called on said event.
+
+    (define/public (page-reordered oldPage new-i)
+      ; range check works around spurious callbacks:
+      (when (and (< -1 new-i (length pages)) callback-ok?)
+        (define old-i
+          (let ([index -1])
+            (for/first ([page pages]
+                        #:when (let ([bin-gtk (page-bin-gtk page)])
+                                 (set! index (+ 1 index))
+                                 (ptr-equal? bin-gtk oldPage)))
+                       index)))
+        ; TODO swap the two page objects
+        (queue-window-event this (lambda ()
+                                   (displayln (format "new-index ~a" new-i))
+                                   (displayln (format "old-index ~a" old-i))
+                                   ; TODO callback
+                                   (println "also hi")))))
+    (connect-reorder notebook-gtk)
     
     (define/override (get-client-gtk) client-gtk)
 
